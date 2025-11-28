@@ -1,0 +1,36 @@
+openapi: 3.0.0
+info:
+  title: Employee Tasks API
+  version: 1.0.0
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+
+  /api/employees:
+    get:
+      summary: List employees
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create employee
+      responses:
+        '201':
+          description: Created
+
+  /api/tasks:
+    get:
+      summary: List tasks
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create task
+      responses:
+        '201':
+          description: Created

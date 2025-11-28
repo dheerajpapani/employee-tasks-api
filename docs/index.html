@@ -1,0 +1,177 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Employee Tasks UI</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    h2 { margin-top: 28px; }
+    .card { padding: 8px 12px; border: 1px solid #eee; border-radius: 6px; margin-bottom: 8px; }
+    .flex { display:flex; gap:8px; align-items:center; }
+    .small { font-size: 0.9rem; color: #555; }
+    input, select, button, textarea { padding:6px; }
+    form { margin-bottom:12px; }
+  </style>
+</head>
+<body>
+  <h1>Employee · Tasks — Minimal UI</h1>
+
+  <section>
+    <h2>Employees</h2>
+    <form id="create-employee-form">
+      <input name="firstName" placeholder="First name" required />
+      <input name="lastName" placeholder="Last name" required />
+      <input name="email" placeholder="email@example.com" required type="email" />
+      <input name="position" placeholder="Position" />
+      <input name="department" placeholder="Department" />
+      <button type="submit">Create Employee</button>
+    </form>
+
+    <div><button id="reload-employees">Reload employees</button></div>
+    <div id="employees-list"></div>
+  </section>
+
+  <section>
+    <h2>Create Task</h2>
+    <form id="create-task-form">
+      <input name="title" placeholder="Title" required />
+      <input name="assignee" placeholder="Assignee _id" required />
+      <select name="priority">
+        <option value="low">low</option>
+        <option value="medium" selected>medium</option>
+        <option value="high">high</option>
+      </select>
+      <select name="status">
+        <option value="todo" selected>todo</option>
+        <option value="in-progress">in-progress</option>
+        <option value="done">done</option>
+      </select>
+      <textarea name="description" placeholder="Optional description"></textarea>
+      <button type="submit">Create Task</button>
+    </form>
+
+    <div>
+      <input id="filter-assignee" placeholder="Assignee ID filter" />
+      <button id="load-tasks">Load Tasks</button>
+    </div>
+
+    <div id="tasks-list"></div>
+  </section>
+
+<script>
+const API = '/api';
+
+// Helper
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, opts);
+  if (!res.ok) {
+    // try to parse json error, else text
+    try { const j = await res.json(); throw new Error(j?.error?.message || JSON.stringify(j)); }
+    catch (e) { throw new Error(await res.text().catch(()=>res.statusText)); }
+  }
+  return res.json();
+}
+
+// Employees
+async function loadEmployees() {
+  const out = document.getElementById('employees-list');
+  out.innerHTML = '<i>Loading...</i>';
+  try {
+    const data = await api('/employees?page=1');
+    if (!data || !Array.isArray(data.data)) {
+      out.innerHTML = '<div class="small">No data</div>';
+      return;
+    }
+    out.innerHTML = data.data.map(e => `
+      <div class="card">
+        <div class="flex">
+          <div><b>${escapeHtml(e.firstName)} ${escapeHtml(e.lastName)}</b> — ${escapeHtml(e.position || '—')}</div>
+          <div style="margin-left:auto" class="small">ID: ${e._id}</div>
+        </div>
+        <div class="small">${escapeHtml(e.email)} · dept: ${escapeHtml(e.department || '—')}</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    out.innerHTML = '<span style="color:red;">Error: '+escapeHtml(err.message)+'</span>';
+  }
+}
+
+document.getElementById('reload-employees').onclick = loadEmployees;
+
+document.getElementById('create-employee-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd.entries());
+
+  try {
+    await api('/employees', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    alert('Employee created');
+    e.target.reset();
+    loadEmployees();
+  } catch (err) {
+    alert(err.message || 'Error');
+  }
+};
+
+// Tasks
+document.getElementById('create-task-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd.entries());
+
+  try {
+    await api('/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    alert('Task created');
+    e.target.reset();
+  } catch (err) {
+    alert(err.message || 'Error');
+  }
+};
+
+document.getElementById('load-tasks').onclick = async () => {
+  const assignee = document.getElementById('filter-assignee').value.trim();
+  const list = document.getElementById('tasks-list');
+  list.innerHTML = '<i>Loading...</i>';
+  try {
+    const q = assignee ? ('?assignee=' + encodeURIComponent(assignee)) : '';
+    const data = await api('/tasks' + q);
+    if (!data || !Array.isArray(data.data) || data.data.length === 0) {
+      list.innerHTML = '<i>No tasks</i>';
+      return;
+    }
+    list.innerHTML = data.data.map(t => `
+      <div class="card">
+        <div><b>${escapeHtml(t.title)}</b> — ${escapeHtml(t.priority)}</div>
+        <div class="small">Assignee: ${t.assignee} · status: ${escapeHtml(t.status)}</div>
+        <div class="small">${escapeHtml(t.description || '')}</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    list.innerHTML = '<span style="color:red;">Error: '+escapeHtml(err.message)+'</span>';
+  }
+};
+
+// Utility to avoid simple XSS if backend returns unexpected values
+function escapeHtml(str) {
+  if (typeof str !== 'string') return str === null || str === undefined ? '' : String(str);
+  return str.replace(/[&<>"'`=\/]/g, function (s) {
+    return ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#x60;','=':'&#x3D;','/':'&#x2F;'
+    })[s];
+  });
+}
+
+// Load employees on page load
+loadEmployees();
+</script>
+</body>
+</html>

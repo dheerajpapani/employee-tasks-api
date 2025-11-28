@@ -1,0 +1,494 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Employee · Tasks — UI</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Employee · Tasks</h1>
+      <div class="note">
+        Backend demo • page
+        <span id="hdr-page">1</span> /
+        <span id="hdr-total-pages">1</span>
+        • page size: <strong id="hdr-page-size">10</strong>
+        • Total Employees: <span id="total-employees">0</span>
+      </div>
+    </div>
+
+    <div class="controls card">
+      <div style="display:flex;gap:8px;flex:1;min-width:0;align-items:center;flex-wrap:wrap">
+        <input id="search-query" class="input" type="text" placeholder="Search name or email (press Enter)" />
+        <button id="btn-search" class="btn">Search</button>
+        <button id="btn-clear" class="btn ghost">Clear</button>
+        <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+          <div class="small">Page</div>
+          <input id="page-input" class="input" type="number" min="1" value="1" />
+          <div class="small" id="page-info">/ 1</div>
+          <button id="go-page" class="btn ghost">Go</button>
+          <button id="prev-page" class="btn ghost">Prev</button>
+          <button id="next-page" class="btn ghost">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="column">
+        <div id="employees-container"></div>
+        <div id="list-footer" class="notice"></div>
+      </div>
+
+      <div class="column">
+        <div class="card">
+          <h3 style="margin-top:0">Create Employee</h3>
+          <form id="create-employee-form">
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <input name="firstName" class="input" placeholder="First name" required />
+              <input name="lastName" class="input" placeholder="Last name" required />
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <input name="email" class="input" placeholder="email@example.com" required type="email" />
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <input name="position" class="input" placeholder="Position" />
+              <input name="department" class="input" placeholder="Department" />
+            </div>
+            <div style="display:flex;gap:8px">
+              <button type="submit" class="btn">Create</button>
+            </div>
+            <div id="create-emp-msg" class="notice"></div>
+          </form>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h3 style="margin-top:0">Create Task</h3>
+          <form id="create-task-form">
+            <input name="title" class="input" placeholder="Title" required style="margin-bottom:8px" />
+            <input name="assignee" class="input" placeholder="Assignee _id" required style="margin-bottom:8px" />
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <select name="priority" class="input">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+              </select>
+              <select name="status" class="input">
+                <option value="todo" selected>todo</option>
+                <option value="in-progress">in-progress</option>
+                <option value="done">done</option>
+              </select>
+            </div>
+            <textarea name="description" class="input" placeholder="Optional description" style="height:80px; margin-bottom:8px"></textarea>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button type="submit" class="btn">Create Task</button>
+              <div id="create-task-msg" class="notice"></div>
+            </div>
+          </form>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h3 style="margin-top:0">Quick tips</h3>
+          <ul class="small">
+            <li>Click the name/email block to expand details and load tasks.</li>
+            <li>Use the employee ID shown on each card when assigning tasks.</li>
+            <li>Search filters backend by first/last/email.</li>
+            <li>Pagination uses backend pages (limit controlled by this UI).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spinner -->
+  <div class="spinner-wrap" aria-hidden="true">
+    <div id="spinner" class="spinner" role="status" aria-hidden="true"></div>
+  </div>
+
+<script>
+const API = '/api';
+const PAGE_SIZE = 10;
+let currentPage = 1;
+let totalPages = 1;
+let lastQuery = '';
+
+const els = {
+  employeesContainer: document.getElementById('employees-container'),
+  pageInput: document.getElementById('page-input'),
+  pageInfo: document.getElementById('page-info'),
+  prevBtn: document.getElementById('prev-page'),
+  nextBtn: document.getElementById('next-page'),
+  goBtn: document.getElementById('go-page'),
+  searchInput: document.getElementById('search-query'),
+  btnSearch: document.getElementById('btn-search'),
+  btnClear: document.getElementById('btn-clear'),
+  listFooter: document.getElementById('list-footer'),
+  createEmpForm: document.getElementById('create-employee-form'),
+  createEmpMsg: document.getElementById('create-emp-msg'),
+  createTaskForm: document.getElementById('create-task-form'),
+  createTaskMsg: document.getElementById('create-task-msg'),
+  spinner: document.getElementById('spinner'),
+  totalEmployeesLabel: document.getElementById('total-employees'),
+  hdrPage: document.getElementById('hdr-page'),
+  hdrTotalPages: document.getElementById('hdr-total-pages'),
+  hdrPageSize: document.getElementById('hdr-page-size')
+};
+
+function showSpinner() { els.spinner.classList.add('show'); }
+function hideSpinner() { els.spinner.classList.remove('show'); }
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  if (typeof s !== 'string') return String(s);
+  return s.replace(/[&<>"'=\/]/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;',
+    '"': '&quot;', "'": '&#39;', '=': '&#x3D;', '/': '&#x2F;'
+  }[c] || c));
+}
+
+/** Normalize Mongo-style ids into plain strings */
+function normalizeId(val) {
+  if (!val) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object') {
+    if (val.$oid) return String(val.$oid);
+    if (typeof val.toHexString === 'function') return val.toHexString();
+    if (typeof val.toString === 'function') return val.toString();
+  }
+  return String(val);
+}
+
+async function api(path, opts = {}) {
+  showSpinner();
+  try {
+    const res = await fetch(API + path, opts);
+    if (!res.ok) {
+      let text;
+      try {
+        const j = await res.json();
+        text = j?.error?.message || JSON.stringify(j);
+      } catch (e) {
+        text = await res.text().catch(() => res.statusText);
+      }
+      throw new Error(text || 'API error');
+    }
+    return await res.json();
+  } finally {
+    hideSpinner();
+  }
+}
+
+/* ------- EMPLOYEES LIST ---------- */
+
+async function loadEmployees(page = 1, q = '') {
+  els.employeesContainer.innerHTML = '<div class="card small">Loading employees…</div>';
+  try {
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('limit', String(PAGE_SIZE));
+    if (q) params.set('q', q);
+
+    const data = await api('/employees?' + params.toString());
+    const list = Array.isArray(data.data) ? data.data : [];
+    currentPage = data.page || page;
+    totalPages = data.totalPages || 1;
+    const total = data.total ?? 0;
+
+    els.pageInput.value = currentPage;
+    els.pageInfo.textContent = '/ ' + totalPages;
+    els.listFooter.textContent = `Showing ${list.length} employees — total ${total}`;
+
+    if (els.totalEmployeesLabel) els.totalEmployeesLabel.textContent = total;
+    if (els.hdrPage) els.hdrPage.textContent = currentPage;
+    if (els.hdrTotalPages) els.hdrTotalPages.textContent = totalPages;
+    if (els.hdrPageSize) els.hdrPageSize.textContent = PAGE_SIZE;
+
+    renderEmployees(list);
+    updatePagerState();
+  } catch (err) {
+    els.employeesContainer.innerHTML =
+      '<div class="card" style="color:red">Error loading employees: ' +
+      escapeHtml(err.message) +
+      '</div>';
+    els.listFooter.textContent = '';
+    totalPages = 1;
+    updatePagerState();
+  }
+}
+
+function renderEmployees(list) {
+  if (!list.length) {
+    els.employeesContainer.innerHTML = '<div class="card small">No employees found.</div>';
+    return;
+  }
+  els.employeesContainer.innerHTML = list.map(emp => {
+    const idStr = normalizeId(emp._id || emp.id);
+    const position = emp.position || '—';
+    const department = emp.department || '—';
+
+    return `
+      <div class="employee card" data-id="${escapeHtml(idStr)}">
+        <div class="employee-main">
+          <div class="employee-info" onclick="toggleDetails('${escapeHtml(idStr)}')">
+            <div class="name-email">
+              <span class="name">${escapeHtml(emp.firstName || '')} ${escapeHtml(emp.lastName || '')}</span>
+              <span class="name-sep"> – </span>
+              <span class="email">${escapeHtml(emp.email || '')}</span>
+            </div>
+            <div class="small">
+              <span class="label">Role:</span> ${escapeHtml(position)}
+              <span class="label-sep">·</span>
+              <span class="label">Dept:</span> ${escapeHtml(department)}
+            </div>
+            <div class="small">
+              <span class="label">ID:</span> ${escapeHtml(idStr)}
+            </div>
+          </div>
+          <div class="employee-actions">
+            <button class="btn-delete" onclick="deleteEmployee('${escapeHtml(idStr)}')">Delete</button>
+          </div>
+        </div>
+        <div id="details-${escapeHtml(idStr)}" class="tasks" style="display:none"></div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ------- TASKS RENDER / LOAD ---------- */
+
+function renderTaskList(tasks, employeeId) {
+  if (!tasks.length) {
+    return '<div class="small">No tasks for this employee.</div>';
+  }
+  return tasks.map(t => {
+    const due = t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '—';
+    const taskId = normalizeId(t._id || t.id);
+    const empIdStr = normalizeId(employeeId);
+
+    return `
+      <div class="task">
+        <div class="task-main">
+          <div class="task-text">
+            <div class="task-title-line">
+              <span class="task-title">${escapeHtml(t.title || '')}</span>
+              <span class="task-priority small">(${escapeHtml(t.priority || '')})</span>
+            </div>
+            <div class="small">${escapeHtml(t.description || '')}</div>
+            <div class="small">Status: ${escapeHtml(t.status || '')} • Due: ${escapeHtml(due)}</div>
+          </div>
+          <div class="task-actions">
+            <label class="task-check-label">
+              <input type="checkbox"
+                     class="task-done-checkbox"
+                     onchange="onTaskDoneToggle(this)">
+              <span class="small">Done</span>
+            </label>
+            <button class="btn-task-delete"
+                    onclick="deleteTask('${escapeHtml(taskId)}','${escapeHtml(empIdStr)}')"
+                    disabled>
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadEmployeeTasks(id, detailsEl) {
+  detailsEl.innerHTML = '<div class="small">Loading tasks…</div>';
+  try {
+    const data = await api(`/employees/${encodeURIComponent(id)}/tasks`);
+    const tasks = Array.isArray(data.data) ? data.data : [];
+    detailsEl.innerHTML = renderTaskList(tasks, id);
+  } catch (err) {
+    detailsEl.innerHTML =
+      '<div class="small" style="color:red">Failed to load tasks: ' +
+      escapeHtml(err.message) +
+      '</div>';
+  }
+}
+
+/* ------- TASK UI TOGGLE (checkbox only, no backend) ---------- */
+
+window.onTaskDoneToggle = function(checkboxEl) {
+  const actions = checkboxEl.closest('.task-actions');
+  const taskEl = checkboxEl.closest('.task');
+  const btn = actions ? actions.querySelector('.btn-task-delete') : null;
+  const checked = checkboxEl.checked;
+
+  if (btn) {
+    btn.disabled = !checked;
+  }
+  if (taskEl) {
+    if (checked) taskEl.classList.add('task-completed');
+    else taskEl.classList.remove('task-completed');
+  }
+};
+
+/* ------- TASK DELETE (real backend call) ---------- */
+
+window.deleteTask = async function(taskId, employeeId) {
+  const id = normalizeId(taskId);
+  const empId = normalizeId(employeeId);
+  if (!id) return;
+  const confirmed = confirm('Delete this task?');
+  if (!confirmed) return;
+
+  try {
+    await api(`/tasks/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    const detailsEl = document.getElementById('details-' + empId);
+    if (detailsEl && detailsEl.style.display === 'block') {
+      await loadEmployeeTasks(empId, detailsEl);
+    }
+  } catch (err) {
+    alert('Failed to delete task: ' + err.message);
+  }
+};
+
+/* ------- EMPLOYEE TASK TOGGLE ---------- */
+
+window.toggleDetails = async function(id) {
+  const detailsEl = document.getElementById('details-' + id);
+  if (!detailsEl) return;
+
+  if (detailsEl.style.display === 'none' || !detailsEl.style.display) {
+    detailsEl.style.display = 'block';
+    await loadEmployeeTasks(id, detailsEl);
+  } else {
+    detailsEl.style.display = 'none';
+  }
+};
+
+/* ------- EMPLOYEE DELETE ---------- */
+
+window.deleteEmployee = async function (id) {
+  if (!id) return;
+  const confirmed = confirm('Delete this employee? This cannot be undone.');
+  if (!confirmed) return;
+
+  try {
+    await api(`/employees/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    loadEmployees(currentPage, lastQuery);
+  } catch (err) {
+    alert('Failed to delete employee: ' + err.message);
+  }
+};
+
+/* ------- PAGER ---------- */
+
+function updatePagerState() {
+  els.prevBtn.disabled = currentPage <= 1;
+  els.nextBtn.disabled = currentPage >= totalPages;
+  els.prevBtn.style.opacity = els.prevBtn.disabled ? '0.6' : '1';
+  els.nextBtn.style.opacity = els.nextBtn.disabled ? '0.6' : '1';
+
+  const pagerElements = [els.pageInput, els.pageInfo, els.goBtn, els.prevBtn, els.nextBtn];
+  pagerElements.forEach(elm => {
+    elm.style.display = totalPages > 1 ? '' : 'none';
+  });
+}
+
+els.prevBtn.onclick = () => {
+  if (currentPage > 1) {
+    currentPage--;
+    loadEmployees(currentPage, lastQuery);
+  }
+};
+els.nextBtn.onclick = () => {
+  if (currentPage < totalPages) {
+    currentPage++;
+    loadEmployees(currentPage, lastQuery);
+  }
+};
+els.goBtn.onclick = () => {
+  const v = Number(els.pageInput.value) || 1;
+  if (v >= 1 && v <= (totalPages || v)) {
+    currentPage = v;
+    loadEmployees(currentPage, lastQuery);
+  } else {
+    alert('Page out of range');
+  }
+};
+els.btnSearch.onclick = () => {
+  lastQuery = els.searchInput.value.trim();
+  currentPage = 1;
+  loadEmployees(currentPage, lastQuery);
+};
+els.btnClear.onclick = () => {
+  els.searchInput.value = '';
+  lastQuery = '';
+  currentPage = 1;
+  loadEmployees(currentPage, '');
+};
+
+/* ------- CREATE EMPLOYEE ---------- */
+
+els.createEmpForm.onsubmit = async (ev) => {
+  ev.preventDefault();
+  els.createEmpMsg.textContent = 'Creating…';
+  const fd = new FormData(els.createEmpForm);
+  const payload = Object.fromEntries(fd.entries());
+  try {
+    await api('/employees', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    els.createEmpMsg.textContent = 'Created ✓';
+    els.createEmpForm.reset();
+    setTimeout(() => { els.createEmpMsg.textContent = ''; }, 1000);
+    loadEmployees(currentPage, lastQuery);
+  } catch (err) {
+    els.createEmpMsg.textContent = 'Error: ' + err.message;
+  }
+};
+
+/* ------- CREATE TASK + LIVE REFRESH ---------- */
+
+els.createTaskForm.onsubmit = async (ev) => {
+  ev.preventDefault();
+  els.createTaskMsg.textContent = 'Creating…';
+  const fd = new FormData(els.createTaskForm);
+  const payload = Object.fromEntries(fd.entries());
+
+  try {
+    await api('/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    els.createTaskMsg.textContent = 'Created ✓';
+    els.createTaskForm.reset();
+    setTimeout(() => { els.createTaskMsg.textContent = ''; }, 1000);
+
+    const empId = normalizeId(payload.assignee);
+    const detailsEl = document.getElementById('details-' + empId);
+    if (detailsEl && detailsEl.style.display === 'block') {
+      await loadEmployeeTasks(empId, detailsEl);
+    }
+  } catch (err) {
+    els.createTaskMsg.textContent = 'Error: ' + err.message;
+  }
+};
+
+/* ------- SEARCH ENTER ---------- */
+
+els.searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    els.btnSearch.click();
+  }
+});
+
+/* initial load */
+loadEmployees(1, '');
+</script>
+</body>
+</html>
